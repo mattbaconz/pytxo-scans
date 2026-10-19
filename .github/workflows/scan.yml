@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 240
     env:
       # One build cache for every worktree pytxo creates.
-      CARGO_TARGET_DIR: ${{ runner.temp }}/target
+      CARGO_TARGET_DIR: /tmp/cargo-target
     steps:
       - uses: actions/checkout@v4
         with:
