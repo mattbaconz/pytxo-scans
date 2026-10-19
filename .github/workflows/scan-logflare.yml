@@ -69,7 +69,7 @@ jobs:
           inputs: agent/*
           base: origin/main
           # pytxo checks run in a fresh worktree; point its Telegraf output at the running container's.
-          checks: "rm -rf db/telegraf_output && ln -s \"$GITHUB_WORKSPACE/db/telegraf_output\" db/telegraf_output && mix local.hex --force && mix local.rebar --force && mix deps.get && epmd -daemon && mix do ecto.create + ecto.migrate + test"
+          checks: "mkdir -p db && rm -rf db/telegraf_output && ln -s \"$GITHUB_WORKSPACE/db/telegraf_output\" db/telegraf_output && mix local.hex --force && mix local.rebar --force && mix deps.get && epmd -daemon && mix do ecto.create + ecto.migrate + test"
           per-input: "true"
       - name: Print the decision
         if: always()
