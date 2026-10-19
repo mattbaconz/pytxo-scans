@@ -1,0 +1,88 @@
+# Reproduces a combined failure with plain git (no Pytxo): merge the pull requests
+# onto main, run the suite, then re-run only the failures to rule out flakes.
+name: verify-logflare
+on:
+  workflow_dispatch:
+    inputs:
+      prs:
+        description: space-separated pull request numbers
+        required: true
+permissions: {}
+jobs:
+  land:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    services:
+      postgres:
+        image: bitnamilegacy/postgresql:15
+        ports: ["5432:5432"]
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: logflare_test
+          POSTGRESQL_WAL_LEVEL: logical
+        options: >-
+          --health-cmd "pg_isready -d logflare_test -U postgres -p 5432"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+      clickhouse:
+        image: clickhouse/clickhouse-server:26.2
+        ports: ["8123:8123", "9000:9000"]
+        env:
+          CLICKHOUSE_DB: logflare_test
+          CLICKHOUSE_USER: logflare
+          CLICKHOUSE_PASSWORD: logflare
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    env:
+      MIX_ENV: test
+      SHELL: /bin/bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Logflare/logflare
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Start Telegraf
+        run: |
+          mkdir -p db/telegraf_output
+          touch db/telegraf_output/metrics.out
+          chmod 666 db/telegraf_output/metrics.out
+          docker compose up -d telegraf
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+      - name: Rust
+        run: rustup toolchain install "$(awk '$1=="rust"{print $2}' .tool-versions)" && rustup default "$(awk '$1=="rust"{print $2}' .tool-versions)"
+      - name: Merge the pull requests with git
+        env:
+          PRS: ${{ inputs.prs }}
+        run: |
+          git config user.email scan@example.invalid
+          git config user.name scan
+          for n in $PRS; do git fetch origin "pull/$n/head:pr-$n"; git merge --no-edit "pr-$n"; done
+          git log --oneline -4
+      - name: Full suite on the combination
+        continue-on-error: true
+        run: |
+          mix local.hex --force && mix local.rebar --force && mix deps.get
+          epmd -daemon
+          mix do ecto.create + ecto.migrate
+          mix test 2>&1 | tee test-1.log
+      - name: Re-run only the failures, twice
+        continue-on-error: true
+        run: |
+          mix test --failed 2>&1 | tee test-2.log
+          mix test --failed 2>&1 | tee test-3.log
+      - name: Summary
+        if: always()
+        run: |
+          for f in test-1.log test-2.log test-3.log; do
+            echo "=== $f"
+            grep -E "Randomized with seed|[0-9]+ tests?, [0-9]+ failures?|^  [0-9]+\) test" "$f" || true
+          done
+          echo "=== first failure details"
+          awk '/^  1\) test/{p=1} p{print; if (++n > 40) exit}' test-1.log
