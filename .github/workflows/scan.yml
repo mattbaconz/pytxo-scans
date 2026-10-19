@@ -56,3 +56,6 @@ jobs:
           base: origin/${{ inputs.base }}
           checks: ${{ inputs.check }}
           per-input: ${{ inputs.per-input }}
+      - name: Print the decision
+        if: always()
+        run: cat pytxo-land.md 2>/dev/null || echo "no pytxo-land.md"
