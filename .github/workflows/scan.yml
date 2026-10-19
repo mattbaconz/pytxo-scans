@@ -1,0 +1,58 @@
+name: scan
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: owner/name
+        required: true
+      prs:
+        description: space-separated pull request numbers
+        required: true
+      base:
+        description: base branch
+        required: true
+        default: main
+      check:
+        description: check command
+        required: true
+      setup:
+        description: optional setup command run in the checkout first
+        required: false
+        default: ""
+      per-input:
+        description: also run the check on each pull request alone
+        required: false
+        default: "false"
+permissions: {}
+jobs:
+  land:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      # One build cache for every worktree pytxo creates.
+      CARGO_TARGET_DIR: ${{ runner.temp }}/target
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.base }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Setup
+        if: inputs.setup != ''
+        env:
+          SETUP: ${{ inputs.setup }}
+        run: bash -c "$SETUP"
+      - name: Fetch the pull requests
+        env:
+          PRS: ${{ inputs.prs }}
+        run: for n in $PRS; do git fetch origin "pull/$n/head:agent/pr-$n"; done
+      - uses: Pytxo-dev/pytxo/actions/land@v1.3.3
+        with:
+          inputs: agent/*
+          base: origin/${{ inputs.base }}
+          checks: ${{ inputs.check }}
+          per-input: ${{ inputs.per-input }}
